@@ -1,97 +1,130 @@
-clc; clear; close all;
+Nb = 10000; % numero de bits
+Tb = 1; % tiempo de bit
+fs = 100; % frecuencia de muestreo
+Ts = 1/fs; % pperiodo de muestreo
+Ns = Tb*fs; % muestras por bit
 
-%% 1) Parámetros del LFSR
-m          = 7;                  % longitud del registro
-taps       = [7 6 3 1];          % taps del polinomio
-estado_ini = [1 0 0 0 0 0 0];        % estado inicial (≠ todo ceros)
-L          = 1000000;              % longitud de la secuencia de bits
+% generacion de la se;al
+bk = randi([0 1], 1, Nb); % bits equiprobables
+ak = 2*bk - 1;
+s = repelem(ak, Ns); % se;al PCM
+t = (0:length(s)-1)*Ts;  
 
-% Generar bits b[n] con el LFSR (USANDO LA FUNCIÓN)
-[b, estado_fin] = LFSR_seq(m, taps, estado_ini, L);
+figure();
+plot(t(1:10*Ns), s(1:10*Ns), 'LineWidth', 1.5);
+xlabel('Tiempo (s)'); ylabel('Amplitud');
+title('Segmento de la señal PCM Polar NRZ');
+grid on; ylim([-1.5 1.5]);
 
-fprintf('Longitud = %d, media de b[n] = %.4f\n', L, mean(b));
-disp('Estado final del LFSR (solo info):');
-disp(estado_fin);
+% ergodicidad, la media y autocorrelacion
+media_temporal = mean(s);
+fprintf('Media Temporal Estimada: %.5f\n', media_temporal);
 
-%% 2) TRANSMISOR: Modulación de amplitud 0 -> -A, 1 -> +A
-A = 1;                     % amplitud (como dice el enunciado)
+% convergencia de la media
+media_acumulada = cumsum(s) ./ (1:length(s));
+figure();
+plot(media_acumulada, 'LineWidth', 1.2);
+yline(0,'r--','Media Teórica');
+xlabel('Muestras'); ylabel('Media');
+title('Convergencia de la media temporal'); grid on;
 
-% Mapeo: 0 -> -1, 1 -> +1
-s = A * (2*b - 1);         % s[n] en {-1, +1}
+% autocorrelacion
+[Rss, lags] = xcorr(s, 'biased');
+tau = lags * Ts;
+R_teorica = (1 - abs(tau)/Tb);
+R_teorica(abs(tau) > Tb) = 0;
 
-% Potencia de la señal s[n]
-Ps = mean(s.^2);
-fprintf('Potencia de la señal s[n]: Ps = %.4f\n', Ps);
+figure();
+plot(tau, Rss, 'b', 'LineWidth', 1.2); hold on;
+plot(tau, R_teorica, 'r--', 'LineWidth', 1.5);
+xlabel('\tau (s)'); ylabel('R_{SS}(\tau)');
+title('Autocorrelación: Temporal vs Teórica');
+legend('Simulada','Teórica'); grid on; xlim([-2*Tb 2*Tb]);
 
-%% 3) CANAL AWGN: x[n] = s[n] + w[n]
-
-% SNR en dB: 0, 2, 4, ..., 14
-SNRdB_vec = 0:2:14;
-numSNR    = length(SNRdB_vec);
-
-sigma2_vec = zeros(1, numSNR);
-x_all      = zeros(numSNR, L);   % cada fila: x[n] para un SNR dado
-
-for i = 1:numSNR
-    SNRdB = SNRdB_vec(i);
-
-    % Varianza del ruido: sigma^2 = Ps / 10^(SNRdB/10)
-    sigma2 = Ps / (10^(SNRdB/10));
-    sigma2_vec(i) = sigma2;
-
-    % Ruido blanco Gaussiano w[n] ~ N(0, sigma^2)
-    w = sqrt(sigma2) * randn(1, L);
-
-    % Señal recibida
-    x = s + w;
-
-    x_all(i, :) = x;
-
-    fprintf('SNR = %2d dB -> sigma^2 = %.5f\n', SNRdB, sigma2);
-end
-
-%% 4) DEMODULADOR y cálculo de probabilidad de error
-
-Pe = zeros(1, numSNR);   % vector para guardar la probabilidad de error
-
-for i = 1:numSNR
-    % Señal recibida para este SNR
-    x = x_all(i, :);
-    
-    % Regla de decisión:
-    % b_hat[n] = 1 si x[n] > 0
-    % b_hat[n] = 0 si x[n] <= 0
-    b_hat = x > 0;    % da vector lógico con 0/1
-    
-    % Número de errores
-    num_err = sum(b_hat ~= b);
-    
-    % Probabilidad de error para este SNR
-    Pe(i) = num_err / L;
-    
-    % Mostrar en pantalla
-    fprintf('SNR = %2d dB | sigma^2 = %.5f | errores = %5d | Pe = %.5e\n', ...
-            SNRdB_vec(i), sigma2_vec(i), num_err, Pe(i));
-end
-
-% Tabla de resultados en el workspace (opcional)
-
-resultados = [SNRdB_vec(:), sigma2_vec(:), Pe(:)];
-
-resultados_tbl = table( SNRdB_vec(:), sigma2_vec(:), Pe(:), ...
-    'VariableNames', {'SNR_dB', 'sigma2', 'Pe'});
-
-
-% Si usas MATLAB, también puedes crear una tabla bonita:
-% resultados_tbl = table(SNRdB_vec(:), sigma2_vec(:), Pe(:), ...
-%     'VariableNames', {'SNR_dB', 'sigma2', 'Pe'});
-
-% Gráfica de Pe (escala logarítmica) vs SNR (dB)
-
-figure;
-semilogy(SNRdB_vec, Pe, '-o', 'LineWidth', 1.5);
+% PDF empírica
+figure();
+histogram(s, 'Normalization','pdf');
+xlabel('Amplitud'); ylabel('Densidad de probabilidad');
+title('Histograma de la señal PCM Polar NRZ');
 grid on;
-xlabel('SNR (dB)');
-ylabel('Probabilidad de error P_e');
-title('Probabilidad de error vs SNR para canal AWGN');
 
+% varias realizaciones 
+figure();
+hold on;
+for k = 1:4
+    bk_aux = randi([0 1], 1, 50);
+    ak_aux = 2*bk_aux - 1;
+    s_aux = repelem(ak_aux, Ns);
+    t_aux = (0:length(s_aux)-1)*Ts;
+    plot(t_aux, s_aux);
+end
+xlabel('Tiempo (s)'); ylabel('Amplitud');
+title('Diferentes realizaciones del proceso PCM Polar NRZ');
+grid on; ylim([-1.5 1.5]);
+
+% estimacion de PSD
+L = length(s);
+f = (-L/2 : L/2-1)*(fs/L);
+
+% PSD Teórica
+arg = f*Tb;
+Sinc_m = sin(pi*arg + eps) ./ (pi*arg + eps); 
+PSD_teorica = Tb * (Sinc_m).^2;
+
+% metodo indirecto
+N_fft = length(Rss);
+f_ind = (-N_fft/2 : N_fft/2-1)*(fs/N_fft);
+PSD_indirecta = real(fftshift(fft(Rss))) * Ts; 
+
+% metodo directo
+S_f = fftshift(fft(s));
+PSD_directa = (abs(S_f).^2 * Ts) / length(s);
+
+% comparacion de PSDs normalizadas
+PSD_dir_n = PSD_directa / max(PSD_directa);
+PSD_ind_n = PSD_indirecta / max(PSD_indirecta);
+PSD_teo_n = PSD_teorica / max(PSD_teorica);
+
+plot(f, 10*log10(PSD_dir_n), 'Color',[0.7 0.7 0.7]); hold on;
+plot(f_ind, 10*log10(PSD_ind_n), 'b','LineWidth',1.2);
+plot(f, 10*log10(PSD_teo_n), 'r--','LineWidth',1.5);
+xlabel('Frecuencia (Hz)'); ylabel('PSD Normalizada (dB)');
+title('Comparación de PSD (Ajustadas a 0 dB)');
+legend('Directo','Indirecto','Teórica');
+grid on; xlim([-4/Tb 4/Tb]); ylim([-60 5]);
+
+% PSD Directa vs Promediada 
+PSD_prom = movmean(PSD_directa, 200);
+figure();
+plot(f, 10*log10(PSD_directa), 'Color',[0.8 0.8 0.8]); hold on;
+plot(f, 10*log10(PSD_prom), 'b','LineWidth',1.3);
+plot(f, 10*log10(PSD_teorica),'r--','LineWidth',1.5);
+xlabel('Frecuencia (Hz)'); ylabel('PSD (dB/Hz)');
+title('Efecto del Promediado en la Estimación Espectral');
+legend('Directa','Promediada','Teórica');
+grid on; xlim([-4/Tb 4/Tb]); ylim([-50 5]);
+
+% PSD terica lineal
+figure();
+plot(f, PSD_teorica, 'r','LineWidth',1.5);
+xlabel('Frecuencia (Hz)'); ylabel('PSD');
+title('PSD Teórica (Escala Lineal)');
+grid on; xlim([-4/Tb 4/Tb]);
+
+% ancho de banda
+BW_Nulo = 1/Tb;
+
+%BW Estimado 95 porciento de la potencia
+idx_pos = f >= 0;
+f_pos = f(idx_pos);
+PSD_pos = PSD_directa(idx_pos); 
+
+Energia_Acum = cumsum(PSD_pos);
+Energia_Total = Energia_Acum(end);
+
+idx_95 = find(Energia_Acum >= 0.95 * Energia_Total, 1);
+BW_95 = f_pos(idx_95);
+
+fprintf('--- Ancho de Banda ---\n');
+fprintf('BW Teórico (Primer Nulo): %.2f Hz\n', BW_Nulo);
+fprintf('BW Estimado (95%% Potencia): %.2f Hz\n', BW_95);
